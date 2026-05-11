@@ -1,0 +1,211 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body{margin:0;padding:12px;font-family:sans-serif;background:#f8f8f6}
+.tabs{display:flex;gap:8px;margin-bottom:12px}
+.tab{padding:6px 16px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer;font-size:13px}
+.tab.on{background:#185FA5;color:#fff;border-color:#185FA5}
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.panel{background:#fff;border-radius:8px;border:1px solid #ddd;padding:10px}
+.panel h3{margin:0 0 8px;font-size:13px;font-weight:600}
+.front-head{color:#185FA5}.rear-head-contra{color:#D85A30}.rear-head-tandem{color:#185FA5}
+.row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.row label{font-size:12px;color:#666;width:44px}
+.row input[type=range]{flex:1}
+.row span{font-size:12px;font-weight:600;width:34px;text-align:right;color:#333}
+canvas{display:block;border-radius:8px;border:1px solid #ddd;background:#fff}
+.stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px}
+.stat{background:#f0f0ee;border-radius:8px;padding:8px 12px}
+.stat p{margin:0;font-size:11px;color:#666}
+.stat b{display:block;font-size:17px;font-weight:600;color:#222;margin-top:2px}
+.btns{display:flex;gap:8px;margin-top:8px}
+.btns button{padding:5px 14px;font-size:12px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer}
+</style>
+</head>
+<body>
+
+<div class="tabs">
+  <button class="tab on" onclick="setMode('contra',this)">Contra-rotating</button>
+  <button class="tab" onclick="setMode('tandem',this)">Tandem</button>
+  <button class="tab" onclick="setMode('both',this)">Side by side</button>
+</div>
+
+<div class="panels">
+  <div class="panel">
+    <h3 class="front-head">Front propeller (CW)</h3>
+    <div class="row"><label>Speed</label><input type="range" min="0" max="3" step="0.1" value="1" oninput="s1=+this.value;document.getElementById('sv1').textContent=s1.toFixed(1)+'x';upStats()"><span id="sv1">1.0x</span></div>
+    <div class="row"><label>Blades</label><input type="range" min="2" max="6" step="1" value="4" oninput="b1=+this.value;document.getElementById('bv1').textContent=b1"><span id="bv1">4</span></div>
+  </div>
+  <div class="panel">
+    <h3 id="rearH" class="rear-head-contra">Rear propeller (CCW)</h3>
+    <div class="row"><label>Speed</label><input type="range" min="0" max="3" step="0.1" value="1" oninput="s2=+this.value;document.getElementById('sv2').textContent=s2.toFixed(1)+'x';upStats()"><span id="sv2">1.0x</span></div>
+    <div class="row"><label>Blades</label><input type="range" min="2" max="6" step="1" value="4" oninput="b2=+this.value;document.getElementById('bv2').textContent=b2"><span id="bv2">4</span></div>
+  </div>
+</div>
+
+<canvas id="cv" width="656" height="280"></canvas>
+
+<div class="stats">
+  <div class="stat"><p>Front torque</p><b id="st1">+100 Nm</b></div>
+  <div class="stat"><p>Rear torque</p><b id="st2">-100 Nm</b></div>
+  <div class="stat"><p>Net torque on hull</p><b id="st3" style="color:#1D9E75">0 Nm balanced</b></div>
+</div>
+
+<div class="btns">
+  <button onclick="paused=!paused;this.textContent=paused?'Resume':'Pause'">Pause</button>
+  <button onclick="syncSpeeds()">Sync speeds</button>
+</div>
+
+<script>
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var mode='contra',paused=false;
+var s1=1,s2=1,b1=4,b2=4;
+var a1=0,a2=0;
+
+function setMode(m,el){
+  mode=m;
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('on')});
+  el.classList.add('on');
+  var rh=document.getElementById('rearH');
+  if(m==='tandem'||m==='both'){rh.textContent='Rear propeller (CW)';rh.className='rear-head-tandem';}
+  else{rh.textContent='Rear propeller (CCW)';rh.className='rear-head-contra';}
+  upStats();
+}
+
+function syncSpeeds(){
+  var avg=((s1+s2)/2);
+  s1=s2=Math.round(avg*10)/10;
+  document.querySelectorAll('input[type=range]')[0].value=s1;
+  document.querySelectorAll('input[type=range]')[2].value=s2;
+  document.getElementById('sv1').textContent=s1.toFixed(1)+'x';
+  document.getElementById('sv2').textContent=s2.toFixed(1)+'x';
+  upStats();
+}
+
+function upStats(){
+  var T1=Math.round(s1*s1*100);
+  var T2=Math.round(s2*s2*100);
+  var ic=mode==='contra';
+  var net=ic?T1-T2:T1+T2;
+  document.getElementById('st1').textContent='+'+T1+' Nm';
+  document.getElementById('st2').textContent=(ic?'-':'+')+T2+' Nm';
+  var el=document.getElementById('st3');
+  el.textContent=(net>=0?'+':'')+net+' Nm '+(ic&&Math.abs(net)<5?'balanced':'');
+  el.style.color=ic&&Math.abs(net)<5?'#1D9E75':Math.abs(net)>100?'#D85A30':'#444';
+}
+
+function blade(cx,cy,ang,n,r,col,tilt){
+  ctx.save();ctx.translate(cx,cy);
+  for(var i=0;i<n;i++){
+    var a=ang+i*(Math.PI*2/n);
+    ctx.save();ctx.rotate(a);
+    ctx.beginPath();
+    ctx.ellipse(0,-r*0.52,r*0.1,r*0.46,tilt||0.15,0,Math.PI*2);
+    ctx.fillStyle=col;ctx.globalAlpha=0.88;ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,0.15)';ctx.lineWidth=0.8;ctx.stroke();
+    ctx.globalAlpha=1;ctx.restore();
+  }
+  ctx.beginPath();ctx.arc(0,0,r*0.15,0,Math.PI*2);ctx.fillStyle='#444';ctx.fill();
+  ctx.beginPath();ctx.arc(0,0,r*0.07,0,Math.PI*2);ctx.fillStyle='#ccc';ctx.fill();
+  ctx.restore();
+}
+
+function rotArrow(cx,cy,r,dir,col){
+  ctx.save();ctx.translate(cx,cy);
+  ctx.beginPath();
+  if(dir>0)ctx.arc(0,0,r,0.3,Math.PI-0.3);
+  else ctx.arc(0,0,r,Math.PI+0.3,Math.PI*2-0.3);
+  ctx.strokeStyle=col;ctx.lineWidth=2;ctx.stroke();
+  var ea=dir>0?Math.PI-0.3:Math.PI*2-0.3;
+  var hx=Math.cos(ea)*r,hy=Math.sin(ea)*r;
+  var tx=-Math.sin(ea)*dir*8,ty=Math.cos(ea)*dir*8;
+  ctx.beginPath();ctx.moveTo(hx,hy);
+  ctx.lineTo(hx+tx-Math.cos(ea)*6,hy+ty-Math.sin(ea)*6);
+  ctx.lineTo(hx-tx-Math.cos(ea)*6,hy-ty-Math.sin(ea)*6);
+  ctx.closePath();ctx.fillStyle=col;ctx.fill();
+  ctx.restore();
+}
+
+function speedRing(cx,cy,r,spd,col){
+  ctx.save();ctx.translate(cx,cy);
+  var frac=Math.min(spd/3,1);
+  ctx.beginPath();ctx.arc(0,0,r+10,-Math.PI/2,-Math.PI/2+frac*Math.PI*2);
+  ctx.strokeStyle=col;ctx.lineWidth=4;ctx.globalAlpha=0.35;ctx.stroke();
+  ctx.globalAlpha=1;
+  ctx.fillStyle=col;ctx.font='bold 11px sans-serif';ctx.textAlign='center';
+  ctx.fillText(spd.toFixed(1)+'x',0,r+24);
+  ctx.restore();
+}
+
+function shaft(x1,x2,cy){
+  ctx.fillStyle='#555';ctx.fillRect(x1,cy-5,x2-x1,10);
+  ctx.fillStyle='#888';ctx.fillRect(x1,cy-3,x2-x1,6);
+}
+
+function thrustArrow(cx,cy){
+  ctx.strokeStyle='#1D9E75';ctx.lineWidth=2.5;
+  ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+65,cy);ctx.stroke();
+  ctx.fillStyle='#1D9E75';
+  ctx.beginPath();ctx.moveTo(cx+65,cy);ctx.lineTo(cx+57,cy-5);ctx.lineTo(cx+57,cy+5);ctx.closePath();ctx.fill();
+  ctx.font='bold 10px sans-serif';ctx.textAlign='center';ctx.fillStyle='#1D9E75';
+  ctx.fillText('Thrust',cx+32,cy-8);
+}
+
+function scene(ox,modeL){
+  var cy=140,R=95;
+  var ic=modeL==='contra';
+  var d2=ic?-1:1;
+  var c2=ic?'#D85A30':'#185FA5';
+
+  shaft(ox+25,ox+235,cy);
+
+  blade(ox+80, cy,a1,        b1,R,'#185FA5');
+  blade(ox+175,cy,a2*(ic?-1:1),b2,R,c2);
+
+  rotArrow(ox+80, cy,R+18, 1,  '#185FA5');
+  rotArrow(ox+175,cy,R+18, d2, c2);
+
+  speedRing(ox+80, cy,R,s1,'#185FA5');
+  speedRing(ox+175,cy,R,s2,c2);
+
+  thrustArrow(ox+90,cy+R+44);
+
+  ctx.fillStyle='#185FA5';ctx.font='bold 11px sans-serif';ctx.textAlign='center';
+  ctx.fillText('Front (CW)',ox+80,cy-R-18);
+  ctx.fillStyle=c2;
+  ctx.fillText('Rear ('+(ic?'CCW':'CW')+')',ox+175,cy-R-18);
+
+  var net=ic?s1*s1-s2*s2:(s1*s1+s2*s2);
+  ctx.fillStyle=ic&&Math.abs(net)<0.05?'#1D9E75':ic?'#D85A30':'#185FA5';
+  ctx.font='bold 10px sans-serif';ctx.textAlign='center';
+  ctx.fillText(ic?(Math.abs(net)<0.05?'Torque balanced':'Residual torque'):'Combined torque: +'+Math.round(net*100)+' Nm',ox+127,270);
+}
+
+function draw(){
+  ctx.clearRect(0,0,656,280);
+  ctx.fillStyle='#fafaf8';ctx.fillRect(0,0,656,280);
+  if(mode==='both'){
+    scene(10,'contra');
+    ctx.strokeStyle='#ddd';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(328,10);ctx.lineTo(328,270);ctx.stroke();
+    scene(338,'tandem');
+    ctx.fillStyle='#555';ctx.font='bold 12px sans-serif';ctx.textAlign='center';
+    ctx.fillText('Contra-rotating',164,14);
+    ctx.fillText('Tandem',492,14);
+  } else {
+    scene(188,mode);
+  }
+}
+
+function loop(){
+  if(!paused){a1+=0.022*s1;a2+=0.022*s2;draw();}
+  requestAnimationFrame(loop);
+}
+
+upStats();
+loop();
+</script>
+</body>
+</html>
